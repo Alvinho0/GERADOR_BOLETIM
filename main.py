@@ -1,3 +1,4 @@
+# SISTEMA DE BOLETIM ESCOLAR - VERSÃO ONLINE
 from flask import Flask, render_template, request, send_file
 from database import Database
 from pdf_generator import gerar_boletim_pdf
@@ -7,10 +8,6 @@ from datetime import datetime
 
 # Configurar o Flask para encontrar os templates
 app = Flask(__name__, template_folder='templates')
-
-# Configurações para produção
-port = int(os.environ.get('PORT', 5000))
-
 db = Database()
 
 print("=" * 50)
@@ -513,7 +510,6 @@ def remover_aluno(matricula):
         return f"Erro ao remover aluno: {e}", 500
 
 if __name__ == '__main__':
-    print("🌐 Servidor iniciado!")
-    print(f"📊 Acesse: http://localhost:{port}")
+    print("🌐 Servidor iniciado! Acesse: http://localhost:5000")
     print("=" * 50)
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(debug=True, host='0.0.0.0', port=5000)
