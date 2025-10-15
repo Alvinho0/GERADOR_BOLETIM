@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Confirmar Remoção</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
+    <style>
+        body {
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            margin-top: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        }
+        .warning-icon {
+            font-size: 60px;
+            color: #dc3545;
+            margin-bottom: 20px;
+        }
+        .warning-card {
+            border: 2px solid #dc3545;
+            border-radius: 10px;
+            background: #f8d7da;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .student-info {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 15px;
+            margin: 15px 0;
+        }
+        .btn-danger-custom {
+            background: linear-gradient(135deg, #dc3545, #c82333);
+            border: none;
+            border-radius: 10px;
+            padding: 12px 30px;
+            font-weight: 600;
+            margin: 5px;
+        }
+        .btn-secondary-custom {
+            background: linear-gradient(135deg, #6c757d, #495057);
+            border: none;
+            border-radius: 10px;
+            padding: 12px 30px;
+            font-weight: 600;
+            margin: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="text-center">
+            <div class="warning-icon">
+                <i class="bi bi-exclamation-triangle-fill"></i>
+            </div>
+            
+            <h1 class="text-danger">⚠️ Confirmar Remoção</h1>
+            <p class="lead">Você está prestes a remover um aluno do sistema</p>
+        </div>
+
+        <!-- Aviso Importante -->
+        <div class="warning-card">
+            <h4 class="text-danger"><i class="bi bi-info-circle"></i> Atenção!</h4>
+            <p class="mb-2"><strong>Esta ação não pode ser desfeita!</strong></p>
+            <p class="mb-0">Todos os dados do aluno, incluindo notas e frequência, serão excluídos permanentemente.</p>
+        </div>
+
+        <!-- Informações do Aluno -->
+        <div class="student-info">
+            <h5>📋 Dados do Aluno a Ser Removido:</h5>
+            <div class="row">
+                <div class="col-md-6">
+                    <p class="mb-1"><strong>Nome:</strong> {{ aluno[1] }}</p>
+                    <p class="mb-1"><strong>Matrícula:</strong> {{ aluno[5] }}</p>
+                    <p class="mb-1"><strong>Série:</strong> {{ aluno[3] }}</p>
+                </div>
+                <div class="col-md-6">
+                    <p class="mb-1"><strong>Disciplinas:</strong> {{ notas|length }}</p>
+                    <p class="mb-1"><strong>Data de Nascimento:</strong> {{ aluno[2] }}</p>
+                    <p class="mb-0"><strong>Responsável:</strong> {{ aluno[4] }}</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Lista de Disciplinas (se houver) -->
+        {% if notas %}
+        <div class="student-info">
+            <h5>📚 Disciplinas que Serão Removidas:</h5>
+            <div class="row">
+                {% for nota in notas %}
+                <div class="col-md-6 mb-1">
+                    <span class="badge bg-secondary">{{ nota[2] }}</span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Botões de Confirmação -->
+        <div class="text-center mt-4">
+            <form method="POST" action="/remover_aluno/{{ aluno[5] }}" class="d-inline">
+                <button type="submit" class="btn btn-danger-custom" onclick="return confirm('Tem certeza absoluta? Esta ação NÃO pode ser desfeita!')">
+                    <i class="bi bi-trash-fill"></i> SIM, Remover Aluno Permanentemente
+                </button>
+            </form>
+            
+            <a href="/aluno/{{ aluno[5] }}" class="btn btn-secondary-custom">
+                <i class="bi bi-x-circle"></i> Cancelar e Voltar
+            </a>
+        </div>
+
+        <!-- Informações Adicionais -->
+        <div class="mt-4 text-center">
+            <small class="text-muted">
+                <i class="bi bi-shield-exclamation"></i>
+                <strong>Proteção de Dados:</strong> Esta ação está em conformidade com a LGPD para exclusão de dados pessoais.
+            </small>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
