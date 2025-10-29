@@ -1,17 +1,21 @@
-# SISTEMA DE BOLETIM ESCOLAR - VERSÃO ONLINE
-from flask import Flask, render_template, request, send_file
+from flask import Flask, render_template, request, send_file, jsonify, redirect, url_for, make_response
 from database import Database
 from pdf_generator import gerar_boletim_pdf
 import io
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
+import jwt
+from functools import wraps
+from werkzeug.security import check_password_hash, generate_password_hash
 
 # Configurar o Flask para encontrar os templates
 app = Flask(__name__, template_folder='templates')
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-key-change-in-production')
+
 db = Database()
 
 print("=" * 50)
-print("🚀 INICIANDO SISTEMA DE BOLETIM ESCOLAR")
+print("🚀 SISTEMA DE BOLETIM ESCOLAR COM LOGIN")
 print("=" * 50)
 print(f"📁 Diretório atual: {os.getcwd()}")
 print(f"📁 Pasta templates existe: {os.path.exists('templates')}")
@@ -21,12 +25,124 @@ if os.path.exists('templates'):
 else:
     print("❌ ERRO: Pasta templates não encontrada!")
 
+# ==================== CONFIGURAÇÃO DE USUÁRIOS ====================
+users_db = {
+    'professor@escola.com': {
+        'password_hash': generate_password_hash('123456'),
+        'user_type': 'professor',
+        'name': 'Professor João Silva',
+        'active': True
+    },
+    'secretaria@escola.com': {
+        'password_hash': generate_password_hash('123456'),
+        'user_type': 'secretaria', 
+        'name': 'Secretária Maria Santos',
+        'active': True
+    }
+}
+
+# ==================== DECORATORS DE AUTENTICAÇÃO ====================
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        token = request.cookies.get('token')
+        
+        if not token:
+            return redirect('/login')
+        
+        try:
+            payload = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+            request.user = payload
+        except jwt.ExpiredSignatureError:
+            return redirect('/login?error=Token expirado')
+        except jwt.InvalidTokenError:
+            return redirect('/login?error=Token inválido')
+        
+        return f(*args, **kwargs)
+    return decorated_function
+
+# ==================== ROTAS DE AUTENTICAÇÃO ====================
 @app.route('/')
 def index():
+    return redirect('/login')
+
+@app.route('/login')
+def login_page():
+    error = request.args.get('error', '')
+    return render_template('login.html', error=error)
+
+@app.route('/api/auth/login', methods=['POST'])
+def login_api():
+    try:
+        data = request.get_json()
+        email = data.get('email', '').strip().lower()
+        password = data.get('password', '')
+        user_type = data.get('user_type', 'professor')
+
+        # Validações básicas
+        if not email or not password:
+            return jsonify({'success': False, 'message': 'E-mail e senha são obrigatórios'}), 400
+
+        # Verificar usuário
+        user = users_db.get(email)
+        if not user or not user['active']:
+            return jsonify({'success': False, 'message': 'Credenciais inválidas'}), 401
+
+        # Verificar senha
+        if not check_password_hash(user['password_hash'], password):
+            return jsonify({'success': False, 'message': 'Credenciais inválidas'}), 401
+
+        # Verificar tipo de usuário
+        if user['user_type'] != user_type:
+            return jsonify({'success': False, 'message': 'Tipo de acesso incorreto'}), 403
+
+        # Gerar token JWT
+        token = jwt.encode({
+            'email': email,
+            'user_type': user['user_type'],
+            'name': user['name'],
+            'exp': datetime.utcnow() + timedelta(hours=24)
+        }, app.config['SECRET_KEY'], algorithm='HS256')
+
+        response = jsonify({
+            'success': True,
+            'user': {
+                'email': email,
+                'name': user['name'],
+                'user_type': user['user_type']
+            }
+        })
+
+        # Configurar cookie HTTP-only
+        response.set_cookie(
+            'token', 
+            token,
+            httponly=True,
+            secure=False,
+            samesite='Lax',
+            max_age=24*60*60
+        )
+
+        return response
+
+    except Exception as e:
+        print(f'Erro no login: {str(e)}')
+        return jsonify({'success': False, 'message': 'Erro interno do servidor'}), 500
+
+@app.route('/logout')
+def logout():
+    response = redirect('/login')
+    response.set_cookie('token', '', expires=0)
+    return response
+
+# ==================== ROTAS DO SISTEMA (PROTEGIDAS) ====================
+@app.route('/sistema')
+@login_required
+def sistema_index():
     try:
         termo_busca = request.args.get('busca', '')
         alunos = db.buscar_alunos(termo_busca)
-        print(f"✅ Página inicial carregada - {len(alunos)} alunos")
+        print(f"✅ Dashboard carregado - {len(alunos)} alunos")
         return render_template('index.html', alunos=alunos, termo_busca=termo_busca)
     except Exception as e:
         error_msg = f"❌ ERRO: {str(e)}"
@@ -36,13 +152,13 @@ def index():
             <body>
                 <h1>Erro ao carregar a página</h1>
                 <p><strong>Erro:</strong> {e}</p>
-                <p>Verifique se o arquivo templates/index.html existe</p>
-                <a href="/">Tentar novamente</a>
+                <a href="/sistema">Tentar novamente</a>
             </body>
         </html>
         """
 
-@app.route('/aluno/<matricula>')
+@app.route('/sistema/aluno/<matricula>')
+@login_required
 def detalhes_aluno(matricula):
     try:
         aluno, notas = db.buscar_aluno_por_matricula(matricula)
@@ -53,7 +169,8 @@ def detalhes_aluno(matricula):
     except Exception as e:
         return f"Erro: {e}"
 
-@app.route('/gerar_boletim/<matricula>')
+@app.route('/sistema/gerar_boletim/<matricula>')
+@login_required
 def gerar_boletim(matricula):
     try:
         print(f"🔍 Buscando aluno com matrícula: {matricula}")
@@ -93,12 +210,13 @@ def gerar_boletim(matricula):
             <body>
                 <h1>Erro ao gerar PDF</h1>
                 <p><strong>Erro:</strong> {e}</p>
-                <a href="/aluno/{matricula}">Voltar</a>
+                <a href="/sistema/aluno/{matricula}">Voltar</a>
             </body>
         </html>
         """, 500
 
-@app.route('/adicionar_aluno')
+@app.route('/sistema/adicionar_aluno')
+@login_required
 def adicionar_aluno_form():
     """Exibe o formulário para adicionar novo aluno"""
     try:
@@ -107,16 +225,8 @@ def adicionar_aluno_form():
     except Exception as e:
         return f"Erro: {e}"
 
-@app.route('/verificar_matricula/<matricula>')
-def verificar_matricula(matricula):
-    """Verifica se uma matrícula já existe (para AJAX)"""
-    try:
-        existe = db.verificar_matricula_existe(matricula)
-        return {'existe': existe}
-    except Exception as e:
-        return {'existe': False, 'erro': str(e)}
-
-@app.route('/adicionar_aluno', methods=['POST'])
+@app.route('/sistema/adicionar_aluno', methods=['POST'])
+@login_required
 def adicionar_aluno():
     """Processa o formulário de adicionar aluno"""
     try:
@@ -134,7 +244,7 @@ def adicionar_aluno():
                 <body>
                     <h1>Erro no Cadastro</h1>
                     <p>A matrícula <strong>{matricula}</strong> já está em uso!</p>
-                    <a href="/adicionar_aluno">Voltar e corrigir</a>
+                    <a href="/sistema/adicionar_aluno">Voltar e corrigir</a>
                 </body>
             </html>
             """, 400
@@ -155,248 +265,24 @@ def adicionar_aluno():
 
         print(f"✅ Novo aluno cadastrado: {nome_completo} (ID: {aluno_id})")
         
-        # Redirecionar para a página de sucesso com CSS
-        return f"""
-        <!DOCTYPE html>
-        <html lang="pt-BR">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Aluno Cadastrado com Sucesso</title>
-            <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-            <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
-            <style>
-                body {{
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    min-height: 100vh;
-                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    padding: 20px;
-                }}
-                .success-container {{
-                    background: white;
-                    border-radius: 20px;
-                    padding: 50px;
-                    text-align: center;
-                    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
-                    max-width: 600px;
-                    width: 100%;
-                }}
-                .success-icon {{
-                    font-size: 80px;
-                    color: #28a745;
-                    margin-bottom: 20px;
-                    animation: bounce 1s infinite alternate;
-                }}
-                @keyframes bounce {{
-                    from {{ transform: translateY(0px); }}
-                    to {{ transform: translateY(-10px); }}
-                }}
-                .success-title {{
-                    color: #28a745;
-                    font-weight: bold;
-                    margin-bottom: 20px;
-                }}
-                .student-name {{
-                    background: linear-gradient(135deg, #28a745, #20c997);
-                    -webkit-background-clip: text;
-                    -webkit-text-fill-color: transparent;
-                    font-weight: bold;
-                    font-size: 1.5em;
-                }}
-                .btn-success-custom {{
-                    background: linear-gradient(135deg, #28a745, #20c997);
-                    border: none;
-                    border-radius: 10px;
-                    padding: 12px 30px;
-                    font-weight: 600;
-                    margin: 5px;
-                    transition: all 0.3s ease;
-                }}
-                .btn-success-custom:hover {{
-                    transform: translateY(-3px);
-                    box-shadow: 0 10px 20px rgba(40, 167, 69, 0.3);
-                }}
-                .btn-primary-custom {{
-                    background: linear-gradient(135deg, #007bff, #0056b3);
-                    border: none;
-                    border-radius: 10px;
-                    padding: 12px 30px;
-                    font-weight: 600;
-                    margin: 5px;
-                    transition: all 0.3s ease;
-                }}
-                .btn-primary-custom:hover {{
-                    transform: translateY(-3px);
-                    box-shadow: 0 10px 20px rgba(0, 123, 255, 0.3);
-                }}
-                .btn-secondary-custom {{
-                    background: linear-gradient(135deg, #6c757d, #495057);
-                    border: none;
-                    border-radius: 10px;
-                    padding: 12px 30px;
-                    font-weight: 600;
-                    margin: 5px;
-                    transition: all 0.3s ease;
-                }}
-                .btn-secondary-custom:hover {{
-                    transform: translateY(-3px);
-                    box-shadow: 0 10px 20px rgba(108, 117, 125, 0.3);
-                }}
-                .success-message {{
-                    background: linear-gradient(135deg, #d4edda, #c3e6cb);
-                    border: 1px solid #c3e6cb;
-                    border-radius: 10px;
-                    padding: 20px;
-                    margin: 20px 0;
-                }}
-                .student-info {{
-                    background: #f8f9fa;
-                    border-radius: 10px;
-                    padding: 15px;
-                    margin: 20px 0;
-                    border-left: 4px solid #28a745;
-                }}
-            </style>
-        </head>
-        <body>
-            <div class="success-container">
-                <div class="success-icon">
-                    <i class="bi bi-check-circle-fill"></i>
-                </div>
-                
-                <h1 class="success-title">Aluno Cadastrado com Sucesso! 🎉</h1>
-                
-                <div class="success-message">
-                    <h4>✅ Cadastro realizado com sucesso!</h4>
-                    <p class="mb-0">O aluno foi adicionado ao sistema e já pode ter seu boletim gerado.</p>
-                </div>
-                
-                <div class="student-info">
-                    <h5>📋 Dados do Aluno:</h5>
-                    <p class="mb-1"><strong>Nome:</strong> <span class="student-name">{nome_completo}</span></p>
-                    <p class="mb-1"><strong>Matrícula:</strong> {matricula}</p>
-                    <p class="mb-1"><strong>Série:</strong> {serie}</p>
-                    <p class="mb-0"><strong>Data de Cadastro:</strong> {datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
-                </div>
-                
-                <div class="mt-4">
-                    <p class="text-muted mb-3">O que você gostaria de fazer agora?</p>
-                    
-                    <div class="d-flex flex-column flex-md-row justify-content-center gap-2">
-                        <a href="/aluno/{matricula}" class="btn btn-primary-custom">
-                            <i class="bi bi-eye"></i> Ver Aluno
-                        </a>
-                        <a href="/adicionar_aluno" class="btn btn-success-custom">
-                            <i class="bi bi-person-plus"></i> Adicionar Outro
-                        </a>
-                        <a href="/" class="btn btn-secondary-custom">
-                            <i class="bi bi-list-ul"></i> Voltar à Lista
-                        </a>
-                    </div>
-                </div>
-                
-                <div class="mt-4">
-                    <small class="text-muted">
-                        <i class="bi bi-info-circle"></i>
-                        O boletim em PDF já pode ser gerado na página do aluno.
-                    </small>
-                </div>
-            </div>
-
-            <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-        </body>
-        </html>
-        """
+        return redirect(f'/sistema/aluno/{matricula}')
 
     except Exception as e:
         print(f"❌ Erro ao cadastrar aluno: {e}")
         import traceback
         traceback.print_exc()
         return f"""
-        <!DOCTYPE html>
-        <html lang="pt-BR">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Erro no Cadastro</title>
-            <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-            <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
-            <style>
-                body {{
-                    background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);
-                    min-height: 100vh;
-                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    padding: 20px;
-                }}
-                .error-container {{
-                    background: white;
-                    border-radius: 20px;
-                    padding: 50px;
-                    text-align: center;
-                    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
-                    max-width: 600px;
-                    width: 100%;
-                }}
-                .error-icon {{
-                    font-size: 80px;
-                    color: #dc3545;
-                    margin-bottom: 20px;
-                }}
-                .error-title {{
-                    color: #dc3545;
-                    font-weight: bold;
-                    margin-bottom: 20px;
-                }}
-                .error-message {{
-                    background: linear-gradient(135deg, #f8d7da, #f5c6cb);
-                    border: 1px solid #f5c6cb;
-                    border-radius: 10px;
-                    padding: 20px;
-                    margin: 20px 0;
-                }}
-                .btn-danger-custom {{
-                    background: linear-gradient(135deg, #dc3545, #c82333);
-                    border: none;
-                    border-radius: 10px;
-                    padding: 12px 30px;
-                    font-weight: 600;
-                    margin: 5px;
-                }}
-            </style>
-        </head>
-        <body>
-            <div class="error-container">
-                <div class="error-icon">
-                    <i class="bi bi-exclamation-triangle-fill"></i>
-                </div>
-                
-                <h1 class="error-title">Erro no Cadastro ❌</h1>
-                
-                <div class="error-message">
-                    <h4>⚠️ Ocorreu um erro durante o cadastro</h4>
-                    <p class="mb-2"><strong>Erro:</strong> {e}</p>
-                    <p class="mb-0">Por favor, verifique os dados e tente novamente.</p>
-                </div>
-                
-                <div class="mt-4">
-                    <a href="/adicionar_aluno" class="btn btn-danger-custom">
-                        <i class="bi bi-arrow-left"></i> Voltar e Tentar Novamente
-                    </a>
-                </div>
-            </div>
-
-            <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-        </body>
+        <html>
+            <body>
+                <h1>Erro no Cadastro</h1>
+                <p><strong>Erro:</strong> {e}</p>
+                <a href="/sistema/adicionar_aluno">Voltar e Tentar Novamente</a>
+            </body>
         </html>
         """, 500
 
-@app.route('/confirmar_remocao/<matricula>')
+@app.route('/sistema/confirmar_remocao/<matricula>')
+@login_required
 def confirmar_remocao(matricula):
     """Página de confirmação para remover aluno"""
     try:
@@ -408,7 +294,8 @@ def confirmar_remocao(matricula):
     except Exception as e:
         return f"Erro: {e}"
 
-@app.route('/remover_aluno/<matricula>', methods=['POST'])
+@app.route('/sistema/remover_aluno/<matricula>', methods=['POST'])
+@login_required
 def remover_aluno(matricula):
     """Remove um aluno do sistema"""
     try:
@@ -416,91 +303,14 @@ def remover_aluno(matricula):
         
         if sucesso:
             print(f"✅ Aluno removido: {matricula}")
-            return f"""
-            <!DOCTYPE html>
-            <html lang="pt-BR">
-            <head>
-                <meta charset="UTF-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Aluno Removido</title>
-                <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-                <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
-                <style>
-                    body {{
-                        background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);
-                        min-height: 100vh;
-                        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        padding: 20px;
-                    }}
-                    .removal-container {{
-                        background: white;
-                        border-radius: 20px;
-                        padding: 50px;
-                        text-align: center;
-                        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
-                        max-width: 600px;
-                        width: 100%;
-                    }}
-                    .removal-icon {{
-                        font-size: 80px;
-                        color: #dc3545;
-                        margin-bottom: 20px;
-                    }}
-                    .removal-title {{
-                        color: #dc3545;
-                        font-weight: bold;
-                        margin-bottom: 20px;
-                    }}
-                    .removal-message {{
-                        background: linear-gradient(135deg, #f8d7da, #f5c6cb);
-                        border: 1px solid #f5c6cb;
-                        border-radius: 10px;
-                        padding: 20px;
-                        margin: 20px 0;
-                    }}
-                    .btn-primary-custom {{
-                        background: linear-gradient(135deg, #007bff, #0056b3);
-                        border: none;
-                        border-radius: 10px;
-                        padding: 12px 30px;
-                        font-weight: 600;
-                        margin: 5px;
-                    }}
-                </style>
-            </head>
-            <body>
-                <div class="removal-container">
-                    <div class="removal-icon">
-                        <i class="bi bi-trash-fill"></i>
-                    </div>
-                    
-                    <h1 class="removal-title">Aluno Removido</h1>
-                    
-                    <div class="removal-message">
-                        <h4>🗑️ Aluno removido do sistema</h4>
-                        <p class="mb-0">Matrícula: <strong>{matricula}</strong></p>
-                        <p class="mb-0">Todos os dados foram excluídos permanentemente.</p>
-                    </div>
-                    
-                    <div class="mt-4">
-                        <a href="/" class="btn btn-primary-custom">
-                            <i class="bi bi-list-ul"></i> Voltar à Lista de Alunos
-                        </a>
-                    </div>
-                </div>
-            </body>
-            </html>
-            """
+            return redirect('/sistema')
         else:
             return f"""
             <html>
                 <body>
                     <h1>Erro ao Remover Aluno</h1>
                     <p><strong>Erro:</strong> {mensagem}</p>
-                    <a href="/">Voltar à Lista</a>
+                    <a href="/sistema">Voltar à Lista</a>
                 </body>
             </html>
             """, 500
@@ -509,7 +319,31 @@ def remover_aluno(matricula):
         print(f"❌ Erro ao remover aluno: {e}")
         return f"Erro ao remover aluno: {e}", 500
 
+# ==================== APIs DO SISTEMA (PROTEGIDAS) ====================
+@app.route('/sistema/api/buscar_alunos')
+@login_required
+def api_buscar_alunos():
+    termo_busca = request.args.get('busca', '')
+    alunos = db.buscar_alunos(termo_busca)
+    return jsonify({'alunos': alunos})
+
+@app.route('/sistema/api/verificar_matricula/<matricula>')
+@login_required
+def api_verificar_matricula(matricula):
+    existe = db.verificar_matricula_existe(matricula)
+    return jsonify({'existe': existe})
+
+# ==================== ROTA DE SAÚDE ====================
+@app.route('/health')
+def health():
+    return jsonify({'status': 'healthy', 'service': 'Sistema de Boletim Escolar'})
+
 if __name__ == '__main__':
-    print("🌐 Servidor iniciado! Acesse: http://localhost:5000")
+    print("🌐 Servidor iniciado!")
+    print("🔐 Página de login: http://localhost:5000/login")
+    print("📊 Sistema principal: http://localhost:5000/sistema")
     print("=" * 50)
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    
+    # Configurações para produção
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)

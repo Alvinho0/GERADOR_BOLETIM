@@ -55,7 +55,7 @@
                     <h1 class="display-5 mb-3">🎓 Sistema de Boletim Escolar</h1>
                     <p class="lead">Gerencie e gere boletins escolares de forma automática</p>
                     <!-- BOTÃO NOVO PARA ADICIONAR ALUNO -->
-                    <a href="/adicionar_aluno" class="btn btn-success btn-lg mt-3">
+                    <a href="/sistema/adicionar_aluno" class="btn btn-success btn-lg mt-3">
                         <i class="bi bi-person-plus"></i> Adicionar Novo Aluno
                     </a>
                 </div>
@@ -66,7 +66,7 @@
         <div class="card">
             <div class="card-body">
                 <h5 class="card-title">🔍 Buscar Aluno</h5>
-                <form method="GET" action="/">
+                <form method="GET" action="/sistema">
                     <div class="row">
                         <div class="col-md-8">
                             <input type="text" class="form-control" name="busca" 
@@ -75,7 +75,7 @@
                         <div class="col-md-4">
                             <button type="submit" class="btn btn-primary w-100">Buscar</button>
                             {% if termo_busca %}
-                            <a href="/" class="btn btn-secondary w-100 mt-2">Limpar</a>
+                            <a href="/sistema" class="btn btn-secondary w-100 mt-2">Limpar</a>
                             {% endif %}
                         </div>
                     </div>
@@ -108,10 +108,10 @@
                                     <td>{{ aluno[3] }}</td>
                                     <td>
                                         <div class="btn-group" role="group">
-                                            <a href="/aluno/{{ aluno[5] }}" class="btn btn-sm btn-info">
+                                            <a href="/sistema/aluno/{{ aluno[5] }}" class="btn btn-sm btn-info">
                                                 <i class="bi bi-eye"></i> Detalhes
                                             </a>
-                                            <a href="/confirmar_remocao/{{ aluno[5] }}" class="btn btn-sm btn-danger">
+                                            <a href="/sistema/confirmar_remocao/{{ aluno[5] }}" class="btn btn-sm btn-danger">
                                                 <i class="bi bi-trash"></i> Remover
                                             </a>
                                         </div>

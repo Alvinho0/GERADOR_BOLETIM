@@ -107,13 +107,13 @@
 
         <!-- Botões de Confirmação -->
         <div class="text-center mt-4">
-            <form method="POST" action="/remover_aluno/{{ aluno[5] }}" class="d-inline">
+            <form method="POST" action="/sistema/remover_aluno/{{ aluno[5] }}" class="d-inline">
                 <button type="submit" class="btn btn-danger-custom" onclick="return confirm('Tem certeza absoluta? Esta ação NÃO pode ser desfeita!')">
                     <i class="bi bi-trash-fill"></i> SIM, Remover Aluno Permanentemente
                 </button>
             </form>
             
-            <a href="/aluno/{{ aluno[5] }}" class="btn btn-secondary-custom">
+            <a href="/sistema/aluno/{{ aluno[5] }}" class="btn btn-secondary-custom">
                 <i class="bi bi-x-circle"></i> Cancelar e Voltar
             </a>
         </div>
